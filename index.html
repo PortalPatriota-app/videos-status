@@ -2,7 +2,13 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no">
+<meta name="theme-color" content="#0d0d0d">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Vídeos para Status — Portal Patriota</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&display=swap" rel="stylesheet">
@@ -126,7 +132,25 @@
     line-height: 1.3;
   }
 
-  /* ===== MODAL DO PLAYER ===== */
+  /* ===== MODAL DO PLAYER =====
+     Estratégia app-shell: quando o modal está aberto, travamos
+     html/body em position:fixed com altura em px real.
+     Todos os elementos internos usam flex-shrink:0 (o único
+     "esticável" é o wrap do vídeo, mas com altura em px também).
+  */
+  body.modal-aberto,
+  html.modal-aberto {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+    overscroll-behavior: none;
+  }
+
   .modal {
     display: none;
     position: fixed;
@@ -134,32 +158,28 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0,0,0,0.92);
+    background: rgba(0,0,0,0.94);
     z-index: 999999;
-    padding: 10px;
     overflow: hidden;
+    overscroll-behavior: none;
   }
-  .modal.open {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-  }
+  .modal.open { display: flex; }
 
   .modal-content {
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 10px;
+    gap: 10px;
+    padding: 12px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
     overflow: hidden;
   }
 
@@ -169,6 +189,7 @@
     overflow: hidden;
     display: block;
     flex-shrink: 0;
+    margin: 0 auto;
   }
   .player-wrap video {
     display: block;
@@ -191,6 +212,9 @@
     cursor: pointer;
     box-shadow: 0 6px 20px rgba(0,156,59,0.45);
     transition: transform 0.12s, background 0.18s;
+    flex-shrink: 0;
+    -webkit-appearance: none;
+    appearance: none;
   }
   .btn-baixar:hover  { background: #007a2e; }
   .btn-baixar:active { transform: scale(0.97); }
@@ -209,6 +233,9 @@
     text-transform: uppercase;
     cursor: pointer;
     transition: all 0.15s;
+    flex-shrink: 0;
+    -webkit-appearance: none;
+    appearance: none;
   }
   .btn-fechar:hover { background: rgba(255,255,255,0.1); }
 
@@ -219,6 +246,7 @@
     text-transform: uppercase;
     min-height: 18px;
     text-align: center;
+    flex-shrink: 0;
   }
 
   /* ===== ESTADOS ===== */
@@ -304,10 +332,12 @@ function nomeBonito(nomeArquivo) {
 
 // Busca a lista de vídeos no GitHub
 async function carregarVideos() {
-  const apiUrl = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/${PASTA_VIDEOS}?ref=${GITHUB_BRANCH}`;
+  // Cache-bust: adiciona timestamp único a cada carregamento
+  // para o WebView do app nunca servir uma versão antiga da lista.
+  const apiUrl = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/${PASTA_VIDEOS}?ref=${GITHUB_BRANCH}&_=${Date.now()}`;
 
   try {
-    const resp = await fetch(apiUrl);
+    const resp = await fetch(apiUrl, { cache: 'no-store' });
     if (!resp.ok) {
       throw new Error(`API retornou ${resp.status}`);
     }
@@ -383,35 +413,69 @@ function renderGrid() {
 let scrollYSalvo = 0;
 const playerWrap = document.querySelector('.player-wrap');
 
-// Impede que o scroll do body vaze através do modal em WebViews
-// que ignoram overflow:hidden. Só ativa quando o modal está aberto.
-function bloquearTouch(e) {
-  if (modal.classList.contains('open') && !modal.contains(e.target)) {
-    e.preventDefault();
-  }
+// ═══ ALTURA REAL DO WEBVIEW ═══
+// Pega o MENOR valor entre 4 fontes possíveis de altura da tela.
+// Nenhuma é confiável sozinha em WebView de app nativo, mas o
+// menor sempre cabe na área realmente visível.
+function alturaVisivelReal() {
+  const candidatos = [];
+  if (window.visualViewport && window.visualViewport.height) candidatos.push(window.visualViewport.height);
+  if (window.innerHeight) candidatos.push(window.innerHeight);
+  if (document.documentElement && document.documentElement.clientHeight) candidatos.push(document.documentElement.clientHeight);
+  if (window.screen && window.screen.availHeight) candidatos.push(window.screen.availHeight);
+  if (!candidatos.length) return 600;
+  return Math.round(Math.min.apply(null, candidatos));
 }
-document.addEventListener('touchmove', bloquearTouch, { passive: false });
+function larguraVisivelReal() {
+  const candidatos = [];
+  if (window.visualViewport && window.visualViewport.width) candidatos.push(window.visualViewport.width);
+  if (window.innerWidth) candidatos.push(window.innerWidth);
+  if (document.documentElement && document.documentElement.clientWidth) candidatos.push(document.documentElement.clientWidth);
+  if (!candidatos.length) return 360;
+  return Math.round(Math.min.apply(null, candidatos));
+}
 
-// Dimensiona TUDO em pixels reais. WebView de app nativo (Instagram,
-// Facebook, apps com WKWebView customizado) frequentemente ignora
-// 100vh, 100dvh e até flex com percentagens. Forçando px, sempre bate.
+// ═══ TOUCHMOVE SELETIVO ═══
+// Quando o modal está aberto, bloqueia scroll em tudo que não seja
+// um elemento com scroll interno de verdade. Isso mata o "void branco"
+// e o arrasto do documento por trás.
+document.addEventListener('touchmove', function (e) {
+  if (!modal.classList.contains('open')) return;
+  let el = e.target;
+  while (el && el !== document.body && el !== document.documentElement) {
+    let s;
+    try { s = getComputedStyle(el); } catch (_) { s = null; }
+    if (s && (s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {
+      return; // deixa rolar dentro desse elemento
+    }
+    el = el.parentElement;
+  }
+  e.preventDefault();
+}, { passive: false });
+
 function dimensionarModal() {
-  const vv = window.visualViewport;
-  const h = (vv && vv.height) ? vv.height : window.innerHeight;
-  const w = (vv && vv.width)  ? vv.width  : window.innerWidth;
+  const h = alturaVisivelReal();
+  const w = larguraVisivelReal();
+
+  // Aplica altura em px em TODOS os containers relevantes ao mesmo
+  // tempo. Se um WebView ignora um, outro pega.
+  const px = h + 'px';
+  document.documentElement.style.height = px;
+  document.documentElement.style.maxHeight = px;
+  document.body.style.height = px;
+  document.body.style.maxHeight = px;
 
   modal.style.top = '0px';
   modal.style.left = '0px';
   modal.style.width = w + 'px';
-  modal.style.height = h + 'px';
+  modal.style.height = px;
+  modal.style.maxHeight = px;
 
-  // Vídeo ocupa no máximo 50% da altura visível. Aplicamos as
-  // dimensões TANTO no wrapper quanto no <video> diretamente,
-  // porque alguns WebViews ignoram restrições em elementos-pais
-  // e deixam o vídeo assumir o tamanho intrínseco (gigante).
+  // Vídeo ocupa 50% da altura visível. Largura calculada por 9:16.
+  // Aplicamos px direto no wrapper E no <video> — WebViews podem
+  // ignorar restrições em pais, então forçamos os dois.
   const alturaMaxPlayer = Math.max(160, Math.floor(h * 0.50));
-  // Assume vídeo vertical 9:16. Calcula a largura correspondente.
-  const larguraMaxPlayer = Math.min(w - 20, Math.floor(alturaMaxPlayer * 9 / 16));
+  const larguraMaxPlayer = Math.min(w - 24, Math.floor(alturaMaxPlayer * 9 / 16));
 
   playerWrap.style.height = alturaMaxPlayer + 'px';
   playerWrap.style.maxHeight = alturaMaxPlayer + 'px';
@@ -428,7 +492,7 @@ window.addEventListener('resize', () => {
   if (modal.classList.contains('open')) dimensionarModal();
 });
 window.addEventListener('orientationchange', () => {
-  if (modal.classList.contains('open')) setTimeout(dimensionarModal, 150);
+  if (modal.classList.contains('open')) setTimeout(dimensionarModal, 400);
 });
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', () => {
@@ -441,18 +505,16 @@ function abrirVideo(idx) {
   player.src = videoAtual.arquivo;
   status.textContent = '';
 
-  // Trava o scroll do documento (funciona no navegador padrão).
   scrollYSalvo = window.scrollY || window.pageYOffset || 0;
-  document.documentElement.style.overflow = 'hidden';
-  document.body.style.overflow = 'hidden';
 
-  // Dimensiona antes de exibir para não haver "flash" gigante.
+  // Trava o documento inteiro como um app-shell: html e body viram
+  // position:fixed com overflow hidden. Estratégia idêntica ao
+  // Debatedor IA — é o que faz o WebView parar de "vazar" espaço.
+  document.documentElement.classList.add('modal-aberto');
+  document.body.classList.add('modal-aberto');
+
   dimensionarModal();
   modal.classList.add('open');
-
-  // WebViews que ignoram position:fixed rolam a página até o modal.
-  // Como o modal agora tem posição forçada em px e nada mais rola,
-  // isso não afeta mais nada, mas mantemos para consistência visual.
   window.scrollTo(0, 0);
 }
 
@@ -462,8 +524,14 @@ function fecharModal() {
   player.src = '';
   status.textContent = '';
 
-  document.documentElement.style.overflow = '';
-  document.body.style.overflow = '';
+  // Destrava o documento
+  document.documentElement.classList.remove('modal-aberto');
+  document.body.classList.remove('modal-aberto');
+  document.documentElement.style.height = '';
+  document.documentElement.style.maxHeight = '';
+  document.body.style.height = '';
+  document.body.style.maxHeight = '';
+
   window.scrollTo(0, scrollYSalvo);
 }
 
