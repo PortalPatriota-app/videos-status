@@ -147,30 +147,32 @@
   }
 
   .modal-content {
-    width: 100%;
-    max-width: 500px;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 8px;
+    padding: 10px;
+    overflow: hidden;
   }
 
   .player-wrap {
-    width: 100%;
     background: #000;
     border-radius: 10px;
     overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    display: block;
+    flex-shrink: 0;
   }
   .player-wrap video {
-    max-width: 100%;
-    max-height: 100%;
-    width: auto;
-    height: auto;
     display: block;
+    background: #000;
   }
 
   .btn-baixar {
@@ -394,8 +396,6 @@ document.addEventListener('touchmove', bloquearTouch, { passive: false });
 // Facebook, apps com WKWebView customizado) frequentemente ignora
 // 100vh, 100dvh e até flex com percentagens. Forçando px, sempre bate.
 function dimensionarModal() {
-  // visualViewport.height reflete a área REALMENTE visível no WebView
-  // (descontando barras nativas do app). É mais confiável que innerHeight.
   const vv = window.visualViewport;
   const h = (vv && vv.height) ? vv.height : window.innerHeight;
   const w = (vv && vv.width)  ? vv.width  : window.innerWidth;
@@ -405,11 +405,24 @@ function dimensionarModal() {
   modal.style.width = w + 'px';
   modal.style.height = h + 'px';
 
-  // Vídeo ocupa no máximo 55% da altura visível. O resto é pra
-  // os dois botões, o status e o padding — assim tudo cabe sem rolar.
-  const alturaMaxPlayer = Math.max(160, Math.floor(h * 0.55));
+  // Vídeo ocupa no máximo 50% da altura visível. Aplicamos as
+  // dimensões TANTO no wrapper quanto no <video> diretamente,
+  // porque alguns WebViews ignoram restrições em elementos-pais
+  // e deixam o vídeo assumir o tamanho intrínseco (gigante).
+  const alturaMaxPlayer = Math.max(160, Math.floor(h * 0.50));
+  // Assume vídeo vertical 9:16. Calcula a largura correspondente.
+  const larguraMaxPlayer = Math.min(w - 20, Math.floor(alturaMaxPlayer * 9 / 16));
+
   playerWrap.style.height = alturaMaxPlayer + 'px';
   playerWrap.style.maxHeight = alturaMaxPlayer + 'px';
+  playerWrap.style.width = larguraMaxPlayer + 'px';
+  playerWrap.style.maxWidth = larguraMaxPlayer + 'px';
+
+  player.style.height = alturaMaxPlayer + 'px';
+  player.style.maxHeight = alturaMaxPlayer + 'px';
+  player.style.width = larguraMaxPlayer + 'px';
+  player.style.maxWidth = larguraMaxPlayer + 'px';
+  player.style.objectFit = 'contain';
 }
 window.addEventListener('resize', () => {
   if (modal.classList.contains('open')) dimensionarModal();
