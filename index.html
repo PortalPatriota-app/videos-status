@@ -93,7 +93,7 @@
     position: relative;
     width: 100%;
     aspect-ratio: 9/16;
-    background: #000;
+    background: linear-gradient(135deg, #002776 0%, #009C3B 60%, #FFDF00 100%);
     overflow: hidden;
   }
   .thumb video, .thumb img {
@@ -102,15 +102,15 @@
     object-fit: cover;
     display: block;
   }
-  .thumb::after {
-    content: '▶';
+  .thumb .play-icon {
     position: absolute;
     top: 50%; left: 50%;
     transform: translate(-50%, -50%);
     color: #fff;
-    font-size: 2.2rem;
+    font-size: 2.6rem;
     text-shadow: 0 2px 12px rgba(0,0,0,0.7);
     pointer-events: none;
+    z-index: 2;
   }
 
   .card-info {
@@ -132,36 +132,32 @@
     position: fixed;
     top: 0;
     left: 0;
-    width: 100vw;
-    height: 100vh;
-    height: 100dvh;
+    right: 0;
+    bottom: 0;
     background: rgba(0,0,0,0.92);
-    z-index: 1000;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+    z-index: 999999;
     padding: 16px;
     overflow: hidden;
   }
-  .modal.open { display: flex; }
+  .modal.open {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
 
   .modal-content {
     width: 100%;
     max-width: 500px;
-    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 12px;
-    min-height: 0;
   }
 
   .player-wrap {
     width: 100%;
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: 60%;
     background: #000;
     border-radius: 10px;
     overflow: hidden;
@@ -345,27 +341,79 @@ function renderGrid() {
   grid.innerHTML = listaVideos.map((v, i) => `
     <div class="card" onclick="abrirVideo(${i})">
       <div class="thumb">
-        <video src="${v.arquivo}#t=0.5" muted preload="metadata" playsinline></video>
+        <video data-src="${v.arquivo}#t=0.5" muted preload="none" playsinline></video>
+        <span class="play-icon">▶</span>
       </div>
       <div class="card-info">
         <div class="card-title">${v.titulo}</div>
       </div>
     </div>
   `).join('');
+
+  // Lazy-load: só carrega a miniatura quando o card entra na tela.
+  // Isso evita que o WebView tente baixar todos os vídeos de uma vez
+  // (o que trava e faz a miniatura demorar minutos ou nunca aparecer).
+  const thumbs = grid.querySelectorAll('.thumb video[data-src]');
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const v = entry.target;
+          v.src = v.dataset.src;
+          v.preload = 'metadata';
+          v.load();
+          io.unobserve(v);
+        }
+      });
+    }, { rootMargin: '200px' });
+    thumbs.forEach(v => io.observe(v));
+  } else {
+    // Fallback simples: carrega em lotes de 6 com pequeno delay
+    thumbs.forEach((v, i) => {
+      setTimeout(() => {
+        v.src = v.dataset.src;
+        v.preload = 'metadata';
+      }, Math.floor(i / 6) * 400);
+    });
+  }
 }
 
 let scrollYSalvo = 0;
+const playerWrap = document.querySelector('.player-wrap');
 
-// Fixa a altura do modal em pixels reais (WebView de app nativo
-// não é confiável com 100vh / 100dvh)
-function ajustarAlturaModal() {
-  modal.style.height = window.innerHeight + 'px';
+// Impede que o scroll do body vaze através do modal em WebViews
+// que ignoram overflow:hidden. Só ativa quando o modal está aberto.
+function bloquearTouch(e) {
+  if (modal.classList.contains('open') && !modal.contains(e.target)) {
+    e.preventDefault();
+  }
+}
+document.addEventListener('touchmove', bloquearTouch, { passive: false });
+
+// Dimensiona TUDO em pixels reais. WebView de app nativo (Instagram,
+// Facebook, apps com WKWebView customizado) frequentemente ignora
+// 100vh, 100dvh e até flex com percentagens. Forçando px, sempre bate.
+function dimensionarModal() {
+  const h = window.innerHeight;
+  const w = window.innerWidth;
+
+  modal.style.top = '0px';
+  modal.style.left = '0px';
+  modal.style.width = w + 'px';
+  modal.style.height = h + 'px';
+
+  // Reserva ~ 220px pros botões e status embaixo; o resto vai pro vídeo.
+  // Assim o player nunca fica gigante nem empurra o botão pra fora.
+  const alturaBotoes = 220;
+  const alturaMaxPlayer = Math.max(180, h - alturaBotoes - 32);
+  playerWrap.style.height = alturaMaxPlayer + 'px';
+  playerWrap.style.maxHeight = alturaMaxPlayer + 'px';
 }
 window.addEventListener('resize', () => {
-  if (modal.classList.contains('open')) ajustarAlturaModal();
+  if (modal.classList.contains('open')) dimensionarModal();
 });
 window.addEventListener('orientationchange', () => {
-  if (modal.classList.contains('open')) setTimeout(ajustarAlturaModal, 100);
+  if (modal.classList.contains('open')) setTimeout(dimensionarModal, 150);
 });
 
 function abrirVideo(idx) {
@@ -373,19 +421,19 @@ function abrirVideo(idx) {
   player.src = videoAtual.arquivo;
   status.textContent = '';
 
-  // Trava o scroll do body de forma compatível com WebView.
-  // Sem isso, position:fixed em alguns WebViews ancora no documento
-  // e o modal aparece fora da área visível.
+  // Trava o scroll do documento (funciona no navegador padrão).
   scrollYSalvo = window.scrollY || window.pageYOffset || 0;
-  document.body.style.position = 'fixed';
-  document.body.style.top = `-${scrollYSalvo}px`;
-  document.body.style.left = '0';
-  document.body.style.right = '0';
-  document.body.style.width = '100%';
+  document.documentElement.style.overflow = 'hidden';
   document.body.style.overflow = 'hidden';
 
-  ajustarAlturaModal();
+  // Dimensiona antes de exibir para não haver "flash" gigante.
+  dimensionarModal();
   modal.classList.add('open');
+
+  // WebViews que ignoram position:fixed rolam a página até o modal.
+  // Como o modal agora tem posição forçada em px e nada mais rola,
+  // isso não afeta mais nada, mas mantemos para consistência visual.
+  window.scrollTo(0, 0);
 }
 
 function fecharModal() {
@@ -394,12 +442,7 @@ function fecharModal() {
   player.src = '';
   status.textContent = '';
 
-  // Restaura o body e o scroll original
-  document.body.style.position = '';
-  document.body.style.top = '';
-  document.body.style.left = '';
-  document.body.style.right = '';
-  document.body.style.width = '';
+  document.documentElement.style.overflow = '';
   document.body.style.overflow = '';
   window.scrollTo(0, scrollYSalvo);
 }
