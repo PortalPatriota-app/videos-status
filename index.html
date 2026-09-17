@@ -136,7 +136,7 @@
     bottom: 0;
     background: rgba(0,0,0,0.92);
     z-index: 999999;
-    padding: 16px;
+    padding: 10px;
     overflow: hidden;
   }
   .modal.open {
@@ -153,7 +153,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 8px;
   }
 
   .player-wrap {
@@ -177,7 +177,7 @@
     width: 100%;
     max-width: 420px;
     font-family: 'Cinzel', serif;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     font-weight: 900;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -185,7 +185,7 @@
     background: var(--verde);
     border: none;
     border-radius: 10px;
-    padding: 18px 24px;
+    padding: 14px 20px;
     cursor: pointer;
     box-shadow: 0 6px 20px rgba(0,156,59,0.45);
     transition: transform 0.12s, background 0.18s;
@@ -199,9 +199,9 @@
     color: #fff;
     border: 1.5px solid rgba(255,255,255,0.4);
     border-radius: 8px;
-    padding: 10px 24px;
+    padding: 8px 22px;
     font-family: 'Cinzel', serif;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 700;
     letter-spacing: 0.18em;
     text-transform: uppercase;
@@ -394,18 +394,20 @@ document.addEventListener('touchmove', bloquearTouch, { passive: false });
 // Facebook, apps com WKWebView customizado) frequentemente ignora
 // 100vh, 100dvh e até flex com percentagens. Forçando px, sempre bate.
 function dimensionarModal() {
-  const h = window.innerHeight;
-  const w = window.innerWidth;
+  // visualViewport.height reflete a área REALMENTE visível no WebView
+  // (descontando barras nativas do app). É mais confiável que innerHeight.
+  const vv = window.visualViewport;
+  const h = (vv && vv.height) ? vv.height : window.innerHeight;
+  const w = (vv && vv.width)  ? vv.width  : window.innerWidth;
 
   modal.style.top = '0px';
   modal.style.left = '0px';
   modal.style.width = w + 'px';
   modal.style.height = h + 'px';
 
-  // Reserva ~ 220px pros botões e status embaixo; o resto vai pro vídeo.
-  // Assim o player nunca fica gigante nem empurra o botão pra fora.
-  const alturaBotoes = 220;
-  const alturaMaxPlayer = Math.max(180, h - alturaBotoes - 32);
+  // Vídeo ocupa no máximo 55% da altura visível. O resto é pra
+  // os dois botões, o status e o padding — assim tudo cabe sem rolar.
+  const alturaMaxPlayer = Math.max(160, Math.floor(h * 0.55));
   playerWrap.style.height = alturaMaxPlayer + 'px';
   playerWrap.style.maxHeight = alturaMaxPlayer + 'px';
 }
@@ -415,6 +417,11 @@ window.addEventListener('resize', () => {
 window.addEventListener('orientationchange', () => {
   if (modal.classList.contains('open')) setTimeout(dimensionarModal, 150);
 });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    if (modal.classList.contains('open')) dimensionarModal();
+  });
+}
 
 function abrirVideo(idx) {
   videoAtual = listaVideos[idx];
