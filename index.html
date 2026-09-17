@@ -354,20 +354,54 @@ function renderGrid() {
   `).join('');
 }
 
+let scrollYSalvo = 0;
+
+// Fixa a altura do modal em pixels reais (WebView de app nativo
+// não é confiável com 100vh / 100dvh)
+function ajustarAlturaModal() {
+  modal.style.height = window.innerHeight + 'px';
+}
+window.addEventListener('resize', () => {
+  if (modal.classList.contains('open')) ajustarAlturaModal();
+});
+window.addEventListener('orientationchange', () => {
+  if (modal.classList.contains('open')) setTimeout(ajustarAlturaModal, 100);
+});
+
 function abrirVideo(idx) {
   videoAtual = listaVideos[idx];
   player.src = videoAtual.arquivo;
-  modal.classList.add('open');
   status.textContent = '';
+
+  // Trava o scroll do body de forma compatível com WebView.
+  // Sem isso, position:fixed em alguns WebViews ancora no documento
+  // e o modal aparece fora da área visível.
+  scrollYSalvo = window.scrollY || window.pageYOffset || 0;
+  document.body.style.position = 'fixed';
+  document.body.style.top = `-${scrollYSalvo}px`;
+  document.body.style.left = '0';
+  document.body.style.right = '0';
+  document.body.style.width = '100%';
   document.body.style.overflow = 'hidden';
+
+  ajustarAlturaModal();
+  modal.classList.add('open');
 }
 
 function fecharModal() {
   modal.classList.remove('open');
   player.pause();
   player.src = '';
-  document.body.style.overflow = '';
   status.textContent = '';
+
+  // Restaura o body e o scroll original
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  document.body.style.width = '';
+  document.body.style.overflow = '';
+  window.scrollTo(0, scrollYSalvo);
 }
 
 // Fecha modal ao tocar fora
