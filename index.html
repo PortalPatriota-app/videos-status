@@ -383,26 +383,66 @@ function renderGrid() {
   `).join('');
 
   // ═══ LAZY-LOAD DAS MINIATURAS ═══
-  // Estratégia: quando o card entra na tela, seta src, preload=auto
-  // e faz um seek forçado pra 0.1s. WebViews de app nativo só pintam
-  // o primeiro frame se você DEMANDA — preload=metadata sozinho
-  // costuma deixar o vídeo preto/vazio.
+  // WebViews de app nativo (Android WebView, Facebook, Instagram)
+  // NÃO renderizam o frame de um <video> só com preload/seek.
+  // A ÚNICA maneira confiável é chamar play() (que é permitido
+  // porque o vídeo é muted+playsinline) e pausar em seguida.
+  // Depois do play(), o frame fica desenhado mesmo após pause().
   function ativarMiniatura(v) {
     if (v.dataset.carregando === '1') return;
     v.dataset.carregando = '1';
 
     v.src = v.dataset.src + '#t=0.1';
     v.preload = 'auto';
+    v.muted = true;              // obrigatório para autoplay em WebView
+    v.defaultMuted = true;
+    v.setAttribute('muted', ''); // reforço para iOS
 
-    const forcarFrame = () => {
+    const capturarFrame = () => {
       try {
         v.currentTime = 0.1;
-      } catch (_) { /* alguns WebViews estouram, tudo bem */ }
+      } catch (_) {}
+
+      const p = v.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          // Deixa pintar 1 ou 2 frames, aí pausa. O frame permanece.
+          setTimeout(() => {
+            try { v.pause(); } catch (_) {}
+          }, 120);
+        }).catch(() => {
+          // Se autoplay foi bloqueado, ao menos tenta seek de novo
+          try { v.currentTime = 0.1; } catch (_) {}
+        });
+      } else {
+        setTimeout(() => { try { v.pause(); } catch (_) {} }, 120);
+      }
     };
-    v.addEventListener('loadedmetadata', forcarFrame, { once: true });
-    v.addEventListener('canplay', forcarFrame, { once: true });
+
+    v.addEventListener('loadeddata', capturarFrame, { once: true });
+    v.addEventListener('canplay', capturarFrame, { once: true });
 
     v.load();
+  }
+
+  // Fila que só ativa 2 miniaturas por vez — assim o WebView não
+  // trava tentando fazer 20 vídeos darem play() ao mesmo tempo.
+  const fila = [];
+  let ativos = 0;
+  const MAX_ATIVOS = 2;
+  function processarFila() {
+    while (ativos < MAX_ATIVOS && fila.length) {
+      const v = fila.shift();
+      ativos++;
+      const marcarPronto = () => {
+        ativos = Math.max(0, ativos - 1);
+        processarFila();
+      };
+      v.addEventListener('pause', marcarPronto, { once: true });
+      v.addEventListener('error', marcarPronto, { once: true });
+      setTimeout(marcarPronto, 3000); // timeout de segurança
+      ativarMiniatura(v);
+    }
   }
 
   const thumbs = grid.querySelectorAll('.thumb video[data-src]');
@@ -410,17 +450,16 @@ function renderGrid() {
     const io = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
-          ativarMiniatura(entry.target);
+          fila.push(entry.target);
           io.unobserve(entry.target);
+          processarFila();
         }
       });
     }, { rootMargin: '300px' });
     thumbs.forEach(v => io.observe(v));
   } else {
-    // Fallback: carrega em lotes pequenos com delay
-    thumbs.forEach((v, i) => {
-      setTimeout(() => ativarMiniatura(v), Math.floor(i / 4) * 300);
-    });
+    thumbs.forEach(v => fila.push(v));
+    processarFila();
   }
 }
 
