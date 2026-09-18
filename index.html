@@ -330,6 +330,25 @@ function nomeBonito(nomeArquivo) {
     .join(' ');
 }
 
+// Busca a data em que cada arquivo foi commitado (= data de upload).
+// A API de contents não devolve isso, então precisamos consultar a
+// API de commits filtrada por caminho. Fazemos em paralelo.
+async function buscarDataUpload(nomeArquivo) {
+  try {
+    const url = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/commits`
+      + `?path=${PASTA_VIDEOS}/${encodeURIComponent(nomeArquivo)}`
+      + `&per_page=1&sha=${GITHUB_BRANCH}&_=${Date.now()}`;
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) return 0;
+    const commits = await r.json();
+    if (!commits.length) return 0;
+    const data = commits[0].commit && commits[0].commit.author && commits[0].commit.author.date;
+    return data ? new Date(data).getTime() : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
 // Busca a lista de vídeos no GitHub
 async function carregarVideos() {
   // Cache-bust: adiciona timestamp único a cada carregamento
@@ -344,15 +363,30 @@ async function carregarVideos() {
     const arquivos = await resp.json();
 
     // Filtra só vídeos
-    listaVideos = arquivos
+    const brutos = arquivos
       .filter(a => a.type === 'file' && /\.(mp4|mov|webm|m4v)$/i.test(a.name))
       .map(a => ({
         titulo: nomeBonito(a.name),
         arquivo: a.download_url,
         nomeOriginal: a.name
-      }))
-      .sort((a, b) => a.titulo.localeCompare(b.titulo, 'pt-BR'));
+      }));
 
+    // Busca a data de upload de cada vídeo em paralelo, depois ordena
+    // do mais novo pro mais antigo. Se a API de commits falhar (ex:
+    // rate limit do GitHub sem autenticação, 60 req/hora por IP), cai
+    // no fallback: ordem alfabética inversa (que ao menos deixa o
+    // usuário controlar via nome do arquivo, tipo "01-...", "02-...").
+    const datas = await Promise.all(brutos.map(v => buscarDataUpload(v.nomeOriginal)));
+    brutos.forEach((v, i) => { v._data = datas[i]; });
+
+    const temAlgumaData = brutos.some(v => v._data > 0);
+    if (temAlgumaData) {
+      brutos.sort((a, b) => b._data - a._data);            // mais novo primeiro
+    } else {
+      brutos.sort((a, b) => b.titulo.localeCompare(a.titulo, 'pt-BR')); // fallback
+    }
+
+    listaVideos = brutos;
     renderGrid();
   } catch (err) {
     grid.innerHTML = `
